@@ -265,8 +265,8 @@ class PreCachedDataset(Dataset):
         return self.n
 
     def __getitem__(self, idx):
-        inp = torch.load(f"{self.inputs_dir}/{idx:05d}.pt", weights_only=True)
-        lbl = torch.load(f"{self.labels_dir}/{idx:05d}.pt", weights_only=True)
+        inp = torch.load(f"{self.inputs_dir}/{idx:05d}.pt", weights_only=True).squeeze(0)
+        lbl = torch.load(f"{self.labels_dir}/{idx:05d}.pt", weights_only=True).squeeze(0)
         return inp, lbl
 
 
