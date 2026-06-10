@@ -225,6 +225,52 @@ class RingUNet(nn.Module):
 
 
 # ---------------------------------------------------------------------------
+# pre-cache: render all training images to disk for fast loading
+# ---------------------------------------------------------------------------
+
+def precache_dataset(full_rings_path: str = "collected_data/full_rings.json",
+                     cache_dir: str = "training_cache"):
+    """Pre-render all training pairs to disk. One-time operation."""
+    from torch.utils.data import DataLoader
+    import os
+
+    os.makedirs(cache_dir, exist_ok=True)
+    dataset = FullRingDataset(full_rings_path)
+
+    inputs_dir = os.path.join(cache_dir, "inputs")
+    labels_dir = os.path.join(cache_dir, "labels")
+    os.makedirs(inputs_dir, exist_ok=True)
+    os.makedirs(labels_dir, exist_ok=True)
+
+    loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=0)
+    for idx, (inp, lbl) in enumerate(loader):
+        torch.save(inp, os.path.join(inputs_dir, f"{idx:05d}.pt"))
+        torch.save(lbl, os.path.join(labels_dir, f"{idx:05d}.pt"))
+        if (idx + 1) % 200 == 0:
+            logger.info("  Cached %d/%d", idx + 1, len(dataset))
+
+    logger.info("Precached %d samples to %s", len(dataset), cache_dir)
+
+
+class PreCachedDataset(Dataset):
+    """Load pre-rendered training pairs from disk."""
+
+    def __init__(self, cache_dir: str = "training_cache"):
+        import os
+        self.inputs_dir = os.path.join(cache_dir, "inputs")
+        self.labels_dir = os.path.join(cache_dir, "labels")
+        self.n = len(os.listdir(self.inputs_dir))
+
+    def __len__(self):
+        return self.n
+
+    def __getitem__(self, idx):
+        inp = torch.load(f"{self.inputs_dir}/{idx:05d}.pt", weights_only=True)
+        lbl = torch.load(f"{self.labels_dir}/{idx:05d}.pt", weights_only=True)
+        return inp, lbl
+
+
+# ---------------------------------------------------------------------------
 # training
 # ---------------------------------------------------------------------------
 
@@ -236,8 +282,15 @@ def train_unet(
     val_split: float = 0.15,
     patience: int = 12,
     output_path: str = "models/ring_unet.pt",
+    use_cache: bool = True,
 ) -> Tuple[nn.Module, dict]:
-    dataset = FullRingDataset(full_rings_path)
+    cache_dir = "training_cache"
+    if use_cache and Path(cache_dir).exists() and len(list(Path(cache_dir + "/inputs").iterdir())) > 0:
+        logger.info("Using pre-cached dataset from %s", cache_dir)
+        dataset = PreCachedDataset(cache_dir)
+    else:
+        logger.info("Generating dataset on-the-fly (slow). Run 'python vision_predictor.py precache' first.")
+        dataset = FullRingDataset(full_rings_path)
     n_val = int(len(dataset) * val_split)
     n_train = len(dataset) - n_val
     train_ds, val_ds = torch.utils.data.random_split(
@@ -428,6 +481,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Ring U-Net Predictor")
     sub = parser.add_subparsers(dest="mode", required=True)
 
+    cp = sub.add_parser("precache", help="Pre-render all training images to disk")
+    cp.add_argument("--data", default="collected_data/full_rings.json")
+
     tp = sub.add_parser("train", help="Train the U-Net")
     tp.add_argument("--data", default="collected_data/full_rings.json")
     tp.add_argument("--epochs", type=int, default=60)
@@ -444,7 +500,9 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    if args.mode == "train":
+    if args.mode == "precache":
+        precache_dataset(args.data)
+    elif args.mode == "train":
         train_unet(args.data, epochs=args.epochs)
 
     elif args.mode == "predict":
