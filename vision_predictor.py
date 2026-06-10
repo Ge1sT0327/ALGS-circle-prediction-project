@@ -28,7 +28,7 @@ import torchvision.transforms as T
 from PIL import Image, ImageDraw
 from scipy.ndimage import gaussian_filter, maximum_filter
 
-from curl_cffi import requests as cffi_requests
+import requests as http_requests
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +124,7 @@ class FullRingDataset(Dataset):
         path = self.cache_dir / url
         if not path.exists():
             logger.info("Downloading map: %s", url)
-            resp = cffi_requests.get(f"https://apexlegendsstatus.com/dgs/{url}",
+            resp = http_requests.get(f"https://apexlegendsstatus.com/dgs/{url}",
                                      impersonate="chrome124", timeout=120)
             path.write_bytes(resp.content)
         return Image.open(path).convert("RGB")
@@ -317,7 +317,7 @@ class ChainPredictor:
         url = MAP_URLS.get(map_name.lower())
         path = self.cache_dir / url
         if not path.exists():
-            resp = cffi_requests.get(f"https://apexlegendsstatus.com/dgs/{url}",
+            resp = http_requests.get(f"https://apexlegendsstatus.com/dgs/{url}",
                                      impersonate="chrome124", timeout=120)
             path.parent.mkdir(exist_ok=True)
             path.write_bytes(resp.content)
