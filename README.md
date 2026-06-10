@@ -1,21 +1,17 @@
 # ALGS Circle Zone Prediction
 
-Predict Apex Legends Global Series (ALGS) circle/ring pull zones using machine learning.
+Predict Apex Legends Global Series (ALGS) circle/ring pull zones using machine learning — supervised and unsupervised.
 
 ## Overview
 
-In competitive Apex Legends (ALGS), predicting where the next ring will pull is a critical strategic advantage. This project:
+In competitive Apex Legends, knowing where the next ring will pull is a critical strategic advantage. This project:
 
-- **Collects** real ALGS match ring data via the apexlegendsstatus.com Ring Guessr API
-- **Trains** a Random Forest classifier to predict the final zone (north/south/east/west/center)
-- **Evaluates** predictions with top-1 and top-3 accuracy metrics
+- **Collects** real ALGS match ring data (460 games) via the apexlegendsstatus.com Ring Guessr API
+- **Trains** 4 model types: Baseline (rule-based), Random Forest, GMM, KDE
+- **Evaluates** with top-1 / top-3 accuracy and cross-validation
+- **Analyzes** ring-pull patterns using K-Means cluster archetypes
 - **Visualizes** zone probability heatmaps
-
-## Data Source
-
-Ring data is scraped from the [apexlegendsstatus.com](https://apexlegendsstatus.com/algs/ring-guessr) Ring Guessr API, which serves real ALGS match ring positions. The API provides ring center coordinates (x, y) and radius for each round, plus the final zone.
-
-Maps supported: World's Edge, Storm Point, Broken Moon, E-District, Kings Canyon, Olympus.
+- **Renders** ring overlays on full-resolution map images (GPU accelerated)
 
 ## Installation
 
@@ -25,81 +21,98 @@ cd ALGS-circle-prediction-project
 pip install -r requirements.txt
 ```
 
-## Usage
-
-### Collect ring data
+## Quick Start
 
 ```bash
-# Collect 500 ALGS ring samples (saved to collected_data/rings.csv)
+# Collect ring data (~460 ALGS games)
 python scraper.py
+
+# Evaluate all models
+python main.py evaluate --data collected_data/rings.csv --model all
+
+# Predict a zone
+python main.py predict --map-name worlds_edge --x 5000 --y -6000 --radius 4800 --stage 2 --model rf --data collected_data/rings.csv --heatmap out.png
+
+# Discover ring-pull patterns
+python main.py analyze --data collected_data/rings.csv --clusters 5
+
+# Render ring overlays on map images
+python -c "
+from map_renderer import MapRendererGPU
+import json
+r = MapRendererGPU()
+games = json.load(open('collected_data/full_rings.json'))
+for g in games:
+    r.render_game(g['match_id'], g['map_name'], g['rings'])
+print(f'Done: {len(games)} images in {r.render_dir}/')
+"
 ```
 
-Or from Python:
+## CLI Reference
 
-```python
-from scraper import scrape_to_csv
-scrape_to_csv(target=200, output_path="collected_data/rings.csv")
+```
+python main.py {train,predict,evaluate,analyze,export-sample}
 ```
 
-### Train a model
+| Command | Flags | Description |
+|---|---|---|
+| `train` | `--data CSV --model {baseline,rf,gmm,kde,all}` | Train a model (default: rf) |
+| `predict` | `--map-name --x --y --radius --stage [--model] [--data] [--heatmap]` | Predict next zone |
+| `evaluate` | `--data CSV --model {baseline,rf,gmm,kde,all}` | Evaluate accuracy |
+| `analyze` | `--data CSV --clusters N` | K-Means ring-pull archetypes |
+| `export-sample` | `--output PATH` | Export built-in sample to CSV |
 
-```bash
-# Train on collected data
-python main.py train --data collected_data/rings.csv
+## Models
 
-# Or train on built-in sample data
-python main.py train
-```
+| Model | Type | Top-1* | Top-3* | Notes |
+|---|---|---|---|---|
+| **Baseline** | Rule-based heuristic | 26.7% | 64.8% | No training needed |
+| **Random Forest** | Supervised | 59% (CV) | — | 5-fold CV, 200 trees, max_depth=8 |
+| **GMM** | Unsupervised | 24.8% | 67.6% | Gaussian Mixture, 5 components/map |
+| **KDE** | Unsupervised | 17.6% | 60.4% | Kernel Density Estimation |
 
-### Predict next zone
-
-```bash
-python main.py predict \
-  --map-name worlds_edge \
-  --x 500 --y -800 \
-  --radius 3200 \
-  --stage 2 \
-  --heatmap prediction.png
-```
-
-### Evaluate
-
-```bash
-python main.py evaluate --data collected_data/rings.csv
-```
+*Top-1/3 on 460-game training set. RF should use CV score for realistic estimate.  
+Random baseline = 20% (5 classes).
 
 ## Project Structure
 
-| File | Purpose |
-|------|---------|
-| `scraper.py` | Ring data collection from Ring Guessr API |
-| `data_models.py` | Dataclass models (CircleRecord, CircleState, ZonePrediction) |
-| `data_io.py` | CSV import/export for ring records |
-| `data_sources.py` | Data source manifest and JSON I/O |
-| `dataset.py` | Sample dataset for quick testing |
-| `feature_engineering.py` | Feature extraction (one-hot maps, stage buckets) |
-| `training.py` | Random Forest model training |
-| `predictor.py` | Rule-based baseline predictor |
-| `evaluation.py` | Accuracy metrics (top-1, top-3) |
-| `visualization.py` | Zone probability heatmap |
-| `project_cli.py` | CLI argument parsing and command routing |
-| `main.py` | Entry point |
+```
+├── main.py                 Entry point
+├── project_cli.py          CLI routing
+├── data_models.py          Core models & constants
+├── data_io.py              CSV read/write
+├── data_sources.py         Data source manifest
+├── dataset.py              Built-in sample data
+├── feature_engineering.py  ML feature extraction
+├── scraper.py              Ring Guessr API scraper
+├── training.py             Random Forest training
+├── predictor.py            Rule-based baseline
+├── unsupervised.py         GMM / KDE / K-Means models
+├── evaluation.py           Accuracy metrics
+├── visualization.py        Probability heatmap
+├── map_renderer.py         GPU-accelerated map overlay renderer
+├── requirements.txt
+└── collected_data/
+    ├── rings.csv           460-game training dataset
+    └── full_rings.json     Full ring sequences for rendering
+```
 
-## Model
+## Data
 
-The primary model is a Random Forest classifier (`RandomForestClassifier`) with:
-- 200 estimators, max depth 8, balanced class weights
-- Features: normalized circle center (x, y), radius, stage, map one-hot encoding, stage bucket
-- Target: 5-way zone classification (north/south/east/west/center)
-
-A simple rule-based baseline (`SimpleCirclePredictor`) is also provided for comparison.
+- **Source**: [apexlegendsstatus.com](https://apexlegendsstatus.com/algs/ring-guessr) Ring Guessr API
+- **Size**: 460 unique ALGS games across 3 competitive maps
+- **Format**: Ring center (x, y) and radius in 16384x16384 pixel coordinate space
+- **Maps**: World's Edge, Storm Point, E-District
+- **Zones**: north / south / east / west / center
 
 ## Requirements
 
 - Python 3.10+
 - numpy, pandas, matplotlib, scikit-learn
-- curl_cffi (TLS fingerprint impersonation for API access)
+- curl_cffi (TLS fingerprinting for API access)
+- PyTorch (GPU map rendering, optional)
+- Pillow (map image rendering)
 
 ## License
 
-This project is for educational and research purposes. Data sourced from apexlegendsstatus.com.
+Educational and research purposes. Data sourced from apexlegendsstatus.com.

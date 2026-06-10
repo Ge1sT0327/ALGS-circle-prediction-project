@@ -1,17 +1,26 @@
+"""Feature extraction for ML models."""
+
 from __future__ import annotations
 
-from dataclasses import asdict
-from typing import Dict, Iterable, List
+from typing import List
 
 from data_models import CircleRecord, CircleState, DEFAULT_MAPS, DEFAULT_ZONES
 
+# Maps and zones are indexed dynamically from training data
+MAP_INDEX = {name: i for i, name in enumerate(DEFAULT_MAPS)}
+ZONE_INDEX = {name: i for i, name in enumerate(DEFAULT_ZONES)}
 
-MAP_INDEX = {name: index for index, name in enumerate(DEFAULT_MAPS)}
-ZONE_INDEX = {name: index for index, name in enumerate(DEFAULT_ZONES)}
+
+def rebuild_indices(maps: list[str], zones: list[str] | None = None) -> None:
+    """Rebuild MAP_INDEX / ZONE_INDEX from data (call after loading dataset)."""
+    global MAP_INDEX, ZONE_INDEX
+    MAP_INDEX = {name: i for i, name in enumerate(maps)}
+    if zones:
+        ZONE_INDEX = {name: i for i, name in enumerate(zones)}
 
 
 def map_to_one_hot(map_name: str) -> List[float]:
-    vec = [0.0] * len(DEFAULT_MAPS)
+    vec = [0.0] * len(MAP_INDEX)
     if map_name in MAP_INDEX:
         vec[MAP_INDEX[map_name]] = 1.0
     return vec
@@ -52,6 +61,7 @@ def label_to_index(label: str) -> int:
 
 
 def index_to_label(index: int) -> str:
-    if 0 <= index < len(DEFAULT_ZONES):
-        return DEFAULT_ZONES[index]
+    zones = list(ZONE_INDEX.keys())
+    if 0 <= index < len(zones):
+        return zones[index]
     return "unknown"

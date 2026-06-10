@@ -1,10 +1,11 @@
+"""Model evaluation — works with any predictor that has a predict(state) method."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Any, Iterable, Protocol
 
 from data_models import CircleRecord, CircleState
-from predictor import SimpleCirclePredictor
 
 
 @dataclass(frozen=True)
@@ -14,7 +15,14 @@ class EvaluationResult:
     total: int
 
 
-def evaluate_records(records: Iterable[CircleRecord], predictor: SimpleCirclePredictor) -> EvaluationResult:
+def evaluate_records(
+    records: Iterable[CircleRecord],
+    predictor: Any,
+) -> EvaluationResult:
+    """Evaluate any predictor on labelled CircleRecords.
+
+    predictor must have:  predict(state: CircleState) -> (best_zone, {zone: prob})
+    """
     total = 0
     hits = 0
     top3_hits = 0
@@ -29,8 +37,8 @@ def evaluate_records(records: Iterable[CircleRecord], predictor: SimpleCirclePre
             stage=record.stage,
         )
         predicted_zone, scores = predictor.predict(state)
-        ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)
-        top3 = [zone for zone, _ in ranked[:3]]
+        ranked = sorted(scores.items(), key=lambda x: -x[1])
+        top3 = [z for z, _ in ranked[:3]]
 
         if predicted_zone == record.final_zone:
             hits += 1
