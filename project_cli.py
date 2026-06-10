@@ -255,6 +255,16 @@ def build_parser() -> argparse.ArgumentParser:
     exp_p = sub.add_parser("export-sample", help="Export built-in sample to CSV")
     exp_p.add_argument("--output", type=Path, required=True)
 
+    # ---- vision ----
+    vis_p = sub.add_parser("vision", help="DINOv2 vision-based ring heatmap prediction")
+    vis_p.add_argument("--map", required=True, choices=["worlds_edge", "storm_point", "e_district"])
+    vis_p.add_argument("--x", type=float, required=True)
+    vis_p.add_argument("--y", type=float, required=True)
+    vis_p.add_argument("--radius", type=float, required=True)
+    vis_p.add_argument("--stage", type=int, default=1, help="Current ring number (1-5)")
+    vis_p.add_argument("--output", default="prediction.png")
+    vis_p.add_argument("--samples", type=int, default=2000)
+
     return parser
 
 
@@ -277,6 +287,14 @@ def main() -> None:
         cmd_analyze(args)
     elif cmd == "simulate":
         cmd_simulate(args)
+    elif cmd == "vision":
+        from vision_predictor import VisionRingPredictor
+        predictor = VisionRingPredictor(n_samples=args.samples)
+        path = predictor.predict_and_render(
+            args.map, args.x, args.y, args.radius,
+            stage=args.stage, output_path=args.output,
+        )
+        print(f"Vision prediction saved to: {path}")
     elif cmd == "export-sample":
         cmd_export_sample(args)
 

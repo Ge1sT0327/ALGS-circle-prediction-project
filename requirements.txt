@@ -7,3 +7,7 @@ beautifulsoup4>=4.12
 lxml>=5.2
 curl_cffi>=0.13
 torch>=2.0
+transformers>=4.40
+torchvision>=0.15
+scipy>=1.10
+opencv-python>=4.8
