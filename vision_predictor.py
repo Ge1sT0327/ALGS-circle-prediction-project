@@ -396,6 +396,15 @@ class ChainPredictor:
     def predict_heatmap(self, map_name: str, ring: dict) -> np.ndarray:
         x = self._render_input(map_name, ring).to(DEVICE)
         hm = self.model(x)[0, 0].cpu().numpy()
+
+        # Constrain: next ring must be inside current ring
+        cr_img = int(ring["r"] / COORD_SPACE * IMG_SIZE)
+        cx_img = int(ring["x"] / COORD_SPACE * IMG_SIZE)
+        cy_img = int(ring["y"] / COORD_SPACE * IMG_SIZE)
+        yy, xx = np.ogrid[:IMG_SIZE, :IMG_SIZE]
+        inside_mask = (xx - cx_img)**2 + (yy - cy_img)**2 <= cr_img**2
+        hm = hm * inside_mask
+
         hm = gaussian_filter(hm, sigma=2.0)
         hm = np.clip(hm, 0, None)
         if hm.sum() > 0:
