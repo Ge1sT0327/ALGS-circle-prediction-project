@@ -279,13 +279,156 @@ class ALGSRingScraper:
         return records
 
 
+FULL_RINGS_FILE = COLLECTED_DIR / "full_rings.json"
+
+
+def _save_full_rings(games: list[dict]) -> None:
+    COLLECTED_DIR.mkdir(parents=True, exist_ok=True)
+    FULL_RINGS_FILE.write_text(json.dumps(games, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _load_full_rings() -> list[dict]:
+    if FULL_RINGS_FILE.exists():
+        try:
+            return json.loads(FULL_RINGS_FILE.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, KeyError):
+            pass
+    return []
+
+
+class ALGSGameCollector(ALGSRingScraper):
+    """Extended scraper that also saves full ring sequences for map rendering."""
+
+    def __init__(self, mode: str = "ALGS", delay: float = 0.5):
+        super().__init__(mode=mode, delay=delay)
+        self.full_games: list[dict] = []
+
+    def collect_one_game(self, seen: set[str]) -> Optional[CircleRecord]:
+        time.sleep(self.delay)
+
+        token = self._start_session()
+        if not token:
+            self.stats.errors += 1
+            return None
+
+        ring_data = self._fetch_ring(token)
+        if not ring_data:
+            self.stats.errors += 1
+            return None
+
+        game_id = ring_data.get("gameId", "")
+        if game_id in seen:
+            self.stats.games_skipped += 1
+            return None
+
+        rings = ring_data.get("rings", [])
+        if len(rings) < 3:
+            self.stats.errors += 1
+            return None
+
+        guess_result = self._submit_guess(token, 1)
+        if not guess_result:
+            self.stats.errors += 1
+            return None
+
+        final_ring = guess_result.get("finalRing", {})
+        game_id = guess_result.get("gameId", game_id)
+
+        if game_id in seen:
+            self.stats.games_skipped += 1
+            return None
+
+        raw_map = ring_data["map"]
+        map_name = _normalize_map_name(raw_map)
+
+        # Save full ring sequence for rendering
+        all_rings = list(rings)
+        if final_ring:
+            all_rings.append(final_ring)
+        self.full_games.append({
+            "match_id": game_id,
+            "map_name": map_name,
+            "raw_map": raw_map,
+            "rings": all_rings,
+            "game_desc": guess_result.get("gameDesc", ""),
+        })
+
+        self.stats.maps_found[map_name] = self.stats.maps_found.get(map_name, 0) + 1
+
+        r1 = rings[0]
+        r2 = rings[1]
+        r3 = rings[2]
+        fr = final_ring
+
+        record = CircleRecord(
+            match_id=game_id,
+            map_name=map_name,
+            stage=1,
+            circle_x=r1["x"],
+            circle_y=r1["y"],
+            circle_radius=r1["r"],
+            next_circle_x=r2["x"],
+            next_circle_y=r2["y"],
+            next_circle_radius=r2["r"],
+            final_zone=_pixel_to_zone(fr.get("x", r3["x"]), fr.get("y", r3["y"])),
+        )
+
+        seen.add(game_id)
+        self.stats.games_collected += 1
+
+        if self.stats.games_collected % 10 == 0:
+            logger.info(
+                "Collected %d games (skipped: %d, errors: %d, maps: %s)",
+                self.stats.games_collected,
+                self.stats.games_skipped,
+                self.stats.errors,
+                dict(self.stats.maps_found),
+            )
+
+        return record
+
+    def collect_games(self, target: int = 200) -> List[CircleRecord]:
+        self.full_games = _load_full_rings()
+        # Add existing full_games IDs to seen set
+        existing_ids = {g["match_id"] for g in self.full_games}
+        seen = _load_seen() | existing_ids
+        records: List[CircleRecord] = []
+
+        logger.info(
+            "Starting collection: target=%d, already seen=%d, full_games=%d",
+            target, len(seen), len(self.full_games),
+        )
+
+        while len(self.full_games) < target:
+            record = self.collect_one_game(seen)
+            if record:
+                records.append(record)
+                _save_seen(seen)
+            # Persist full rings incrementally
+            if self.full_games and len(self.full_games) % 10 == 0:
+                _save_full_rings(self.full_games)
+
+            if self.stats.errors > target * 3:
+                logger.error("Too many errors, stopping collection")
+                break
+
+        _save_full_rings(self.full_games)
+        logger.info(
+            "Collection complete: %d records, %d skipped, %d errors, %d full games",
+            len(records), self.stats.games_skipped, self.stats.errors, len(self.full_games),
+        )
+        return records
+
+
 def scrape_to_csv(target: int = 200, output_path: str | Path = "collected_data/rings.csv") -> Path:
-    """High-level helper: collect ring data and save to CSV."""
-    scraper = ALGSRingScraper(mode="ALGS", delay=0.3)
+    """High-level helper: collect ring data and save to CSV + full rings JSON."""
+    scraper = ALGSGameCollector(mode="ALGS", delay=0.3)
     records = scraper.collect_games(target)
     path = Path(output_path)
     save_records_csv(records, path)
-    logger.info("Saved %d records to %s", len(records), path)
+    _save_full_rings(scraper.full_games)
+    logger.info("Saved %d records to %s, %d full games to %s",
+                len(records), path, len(scraper.full_games), FULL_RINGS_FILE)
     return path
 
 
@@ -293,3 +436,4 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     path = scrape_to_csv(target=500)
     print(f"Data saved to {path}")
+    print(f"Full ring data saved to {FULL_RINGS_FILE}")
